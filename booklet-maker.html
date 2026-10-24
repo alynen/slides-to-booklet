@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slide Booklet Maker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<style>
+/* Layout: one centered work card on the booklet's own warm gray, teal band as footer */
+:root{
+  --bg:#e2dfde; --card:#ffffff; --ink:#13100e; --muted:#6b6562;
+  --line:#c8c5c3; --teal:#35ad75; --teal-dk:#286581; --mint:#5ac6a7;
+  --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 var(--body);display:flex;flex-direction:column;min-height:100vh}
+main{flex:1;display:flex;justify-content:center;padding:48px 16px}
+.card{background:var(--card);width:100%;max-width:620px;padding:32px;border-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.06);display:flex;flex-direction:column;gap:22px}
+h1{font:600 2rem/1.1 var(--display);letter-spacing:.04em;text-transform:uppercase;margin:0}
+.sub{color:var(--muted);margin:4px 0 0}
+.drop{border:2px dashed var(--line);border-radius:6px;padding:36px 16px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--teal);background:#f3faf6}
+.drop strong{display:block;font-weight:600}
+.drop span{color:var(--muted);font-size:.9rem}
+#file{display:none}
+.row{display:flex;gap:16px;flex-wrap:wrap;align-items:end}
+label{display:flex;flex-direction:column;gap:4px;font-size:.85rem;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+input[type=number]{font:inherit;width:110px;padding:8px 10px;border:1px solid var(--line);border-radius:4px;color:var(--ink)}
+.check{flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:.95rem;color:var(--ink)}
+button{font:600 1rem var(--body);background:var(--teal-dk);color:#fff;border:0;border-radius:4px;padding:12px 22px;cursor:pointer}
+button:disabled{opacity:.45;cursor:default}
+button:focus-visible,input:focus-visible,.drop:focus-visible{outline:3px solid var(--mint);outline-offset:2px}
+#status{min-height:1.5em;font-size:.95rem}
+#status.err{color:#b3261e}
+a.dl{display:inline-block;font-weight:600;color:var(--teal-dk)}
+.spec{font-size:.85rem;color:var(--muted);border-top:1px solid var(--line);padding-top:16px;margin:0}
+footer{height:40px;background:linear-gradient(90deg,var(--teal-dk),var(--teal),var(--mint))}
+@media (max-width:480px){.card{padding:22px}}
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <div>
+      <h1>Slide Booklet Maker</h1>
+      <p class="sub">Turn a slide PDF into a portrait note-taking booklet: title cover, then 2 slides per page with 3 note lines under each.</p>
+    </div>
+
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose a slide PDF">
+      <strong id="dropTitle">Drop the slide PDF here</strong>
+      <span>or click to choose. Export it from PowerPoint first (File &gt; Export &gt; PDF).</span>
+      <input type="file" id="file" accept="application/pdf">
+    </div>
+
+    <div class="row">
+      <label for="cover">Cover slide #
+        <input type="number" id="cover" min="1" value="1">
+      </label>
+      <label class="check" for="skipBefore">
+        <input type="checkbox" id="skipBefore" checked> Leave out slides before the cover
+      </label>
+    </div>
+
+    <div class="row">
+      <button id="go" disabled>Make booklet</button>
+      <div id="status" aria-live="polite"></div>
+    </div>
+
+    <p class="spec">US Letter, light gray pages, white note area with 3 lines under each slide, page numbers in a teal band. Everything runs in your browser; the file never leaves your computer.</p>
+  </div>
+</main>
+<footer></footer>
+
+<script>
+const {PDFDocument, rgb, StandardFonts} = PDFLib;
+const $ = id => document.getElementById(id);
+let srcBytes = null, srcName = "slides";
+
+function pick(f){
+  if(!f) return;
+  if(f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)){ setStatus("That isn't a PDF. Export the deck to PDF and try again.", true); return; }
+  srcName = f.name.replace(/\.pdf$/i,"");
+  f.arrayBuffer().then(b => { srcBytes = b; $("dropTitle").textContent = f.name; $("go").disabled = false; setStatus(""); });
+}
+function setStatus(msg, err){ const s=$("status"); s.className = err ? "err" : ""; s.textContent = msg; }
+
+const drop = $("drop");
+drop.addEventListener("click", () => $("file").click());
+drop.addEventListener("keydown", e => { if(e.key==="Enter"||e.key===" "){ e.preventDefault(); $("file").click(); }});
+$("file").addEventListener("change", e => pick(e.target.files[0]));
+["dragenter","dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave","drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => pick(e.dataTransfer.files[0]));
+
+async function makeBooklet(bytes, coverIdx, skipBefore){
+  const W=612, H=792, X0=45, SW=522, TOPS=[34,382], NOTE_H=46, FOOT=40;
+  const BG=rgb(226/255,223/255,222/255), DARK=rgb(19/255,16/255,14/255), LINE=rgb(200/255,197/255,195/255);
+  const grad=[[40,101,129],[53,173,117],[90,198,167]];
+  const src = await PDFDocument.load(bytes);
+  const out = await PDFDocument.create();
+  const font = await out.embedFont(StandardFonts.HelveticaBold);
+  const n = src.getPageCount();
+  if(coverIdx >= n) throw new Error("The PDF only has " + n + " slides.");
+  const emb = await out.embedPages(src.getPages());
+  const {width:sw, height:sh} = src.getPage(0).getSize();
+  const SH = sh * SW / sw;
+
+  // cover
+  const cv = out.addPage([W,H]);
+  cv.drawRectangle({x:0,y:0,width:W,height:H,color:DARK});
+  const ch = sh * W / sw;
+  cv.drawPage(emb[coverIdx], {x:0, y:(H-ch)/2, width:W, height:ch});
+
+  const start = skipBefore ? coverIdx+1 : 0;
+  const rest = []; for(let i=start;i<n;i++) if(i!==coverIdx) rest.push(i);
+  let num = 1;
+  for(let i=0;i<rest.length;i+=2){
+    const pg = out.addPage([W,H]);
+    pg.drawRectangle({x:0,y:0,width:W,height:H,color:BG});
+    TOPS.forEach((top,j) => {
+      if(i+j >= rest.length) return; // no empty note area on a single-slide last page
+      const y = H-top-SH;
+      pg.drawRectangle({x:X0,y:y-NOTE_H,width:SW,height:NOTE_H,color:rgb(1,1,1)});
+      for(let k=1;k<4;k++){ const ly=y-NOTE_H*k/4+1; pg.drawLine({start:{x:X0+10,y:ly},end:{x:X0+SW-10,y:ly},thickness:.6,color:LINE}); }
+      pg.drawPage(emb[rest[i+j]], {x:X0, y, width:SW, height:SH});
+    });
+    const steps=60;
+    for(let s=0;s<steps;s++){
+      const t=s/(steps-1), a=t<.5?grad[0]:grad[1], b=t<.5?grad[1]:grad[2], u=t<.5?t*2:t*2-1;
+      const c=[0,1,2].map(k=>(a[k]+(b[k]-a[k])*u)/255);
+      pg.drawRectangle({x:W*s/steps,y:0,width:W/steps+1,height:FOOT,color:rgb(c[0],c[1],c[2])});
+    }
+    const label=String(num), tw=font.widthOfTextAtSize(label,11);
+    pg.drawText(label,{x: num%2===0 ? X0 : X0+SW-tw, y:FOOT/2-4, size:11, font, color:rgb(1,1,1)});
+    num++;
+  }
+  return {bytes: await out.save(), pages: out.getPageCount()};
+}
+window.makeBooklet = makeBooklet;
+
+$("go").addEventListener("click", async () => {
+  if(!srcBytes) return;
+  $("go").disabled = true; setStatus("Building… large decks can take a minute.");
+  try{
+    const coverIdx = Math.max(0, (parseInt($("cover").value,10)||1) - 1);
+    const {bytes, pages} = await makeBooklet(srcBytes, coverIdx, $("skipBefore").checked);
+    const url = URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
+    const name = srcName + " Booklet.pdf";
+    const a = document.createElement("a"); a.href=url; a.download=name; a.click();
+    $("status").innerHTML = ""; setStatus("Done: " + pages + " pages. ");
+    const link = document.createElement("a"); link.className="dl"; link.href=url; link.download=name; link.textContent="Download again";
+    $("status").appendChild(link);
+  }catch(e){ setStatus("Couldn't build the booklet: " + e.message, true); }
+  $("go").disabled = false;
+});
+</script>
+</body>
+</html>

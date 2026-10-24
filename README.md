@@ -20,6 +20,10 @@ The first real run produced booklets for a two-part course tour: 102 pages from 
 
 ## Use it
 
+**In the browser, no install:** download [`booklet-maker.html`](booklet-maker.html), open it in Chrome or Safari, drop in the slide PDF and click **Make booklet**. Everything runs locally with [pdf-lib](https://pdf-lib.js.org), so the deck never leaves your computer.
+
+**From the command line:**
+
 ```
 pip install pypdf reportlab
 python3 booklet.py "My Deck.pdf" "My Deck Booklet.pdf"
